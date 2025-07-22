@@ -6,7 +6,7 @@ This repository contains code and Jupyter notebooks for analyzing physical educa
 - **Object detection** (e.g., javelin with YOLO)  
 - **Kinematic analysis** of javelin throwing performance
 
-## 🚀 Features
+## 📦 Features
 
 - **Person detection:** Track and assign consistent IDs to individual students.
 - **Pose estimation:** Detect key human body landmarks (ankle, knee, hip, wrist, elbow, shoulder, bilaterally).
