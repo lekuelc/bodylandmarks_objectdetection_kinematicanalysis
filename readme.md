@@ -97,6 +97,6 @@ Use the Streamlit app for interactive visualization:
 ## 🙏 Contributions
 
 - **Pull requests:** Contributions are welcome! If you have improvements or fixes, please submit a pull request.
-- **Suggestions:** Ideas for new features or changes are also appreciated—feel free to open an issue.
+- **Suggestions:** Ideas for new features or changes are also appreciated. Feel free to open an issue.
 
 ---
