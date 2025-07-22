@@ -1,6 +1,5 @@
 # === streamlit_pose_viewer.py (fixed session state initialization) ===
 
-# streamlit run "/Users/Christian/Christian Home Drive/Christian/Projekte/CURRENTLY RUNNING PROJECTS/CV and NLP/Python_codes and apps/streamlit_pose_viewer.py"
 
 import streamlit as st
 import cv2
