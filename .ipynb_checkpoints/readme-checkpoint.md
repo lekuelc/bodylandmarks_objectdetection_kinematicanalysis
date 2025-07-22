@@ -1,4 +1,4 @@
-# Bodylandmarks & Object Detection & Kinematic Analysis in Physical Education Classes
+# Body landmarks & Object Detection & Kinematic Analysis in Physical Education Classes
 
 This repository contains code and Jupyter notebooks for analyzing physical education class videos. It enables:  
 - **Person (ID) detection and tracking**  
