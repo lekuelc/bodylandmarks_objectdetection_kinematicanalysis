@@ -3,7 +3,7 @@
 This repository contains code and Jupyter notebooks for analyzing physical education class videos. It enables:  
 - **Person (ID) detection and tracking**  
 - **Body landmark detection** (major joints)  
-- **Object detection** (e.g., javelin with YOLO)  
+- **Object detection** (javelin with YOLO)  
 - **Kinematic analysis** of javelin throwing performance
 
 ## 📦 Features
@@ -58,7 +58,7 @@ This repository contains code and Jupyter notebooks for analyzing physical educa
     ```
 
 3. **Provide your own video/data files:**  
-   Recordings of students performing motor skills (e.g., javelin throwing). For best results with javelin, record from a side view.
+   Recordings of students performing motor skills (javelin throwing). For best results with javelin, record from a side view.
 
 ## ▶️ Usage
 
