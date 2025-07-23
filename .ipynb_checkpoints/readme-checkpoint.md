@@ -9,8 +9,8 @@ This repository contains code and Jupyter notebooks for analyzing physical educa
 ## 📦 Features
 
 - **Person detection:** Track and assign consistent IDs to individual students.
-- **Pose estimation:** Detect key human body landmarks (ankle, knee, hip, wrist, elbow, shoulder, bilaterally).
-- **Object detection:** Track objects, such as the javelin, using a pretrained YOLO model.
+- **Pose estimation:** Detect key human body landmarks (ankle, knee, hip, wrist, elbow, shoulder - bilaterally).
+- **Object detection:** Track objects, in this case the javelin, using a pretrained YOLO model.
 - **Kinematic analysis:** Quantify and visualize movement metrics using pose and object detection results.
 - **Interactive tools:** Streamlit app for easy visualization of all outputs.
 
