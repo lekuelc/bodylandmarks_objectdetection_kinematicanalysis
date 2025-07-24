@@ -1,4 +1,4 @@
-# Body landmarks & Object Detection & Kinematic Analysis in Physical Education Classes
+# Body landmarks & Object Detection & Kinematic Analysis in Physical Education Lessons
 
 This repository contains code and Jupyter notebooks for analyzing physical education class videos. It enables:  
 - **Person (ID) detection and tracking**  
@@ -58,7 +58,7 @@ This repository contains code and Jupyter notebooks for analyzing physical educa
     ```
 
 3. **Provide your own video/data files:**  
-   Recordings of students performing motor skills (javelin throwing). For best results with javelin, record from a side view.
+   Recordings of students performing motor skills (##javelin throwing). For best results with javelin, record from a side view.
 
 ## ▶️ Usage
 
