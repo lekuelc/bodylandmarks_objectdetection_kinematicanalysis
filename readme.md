@@ -23,7 +23,7 @@ This repository contains code and Jupyter notebooks for analyzing physical educa
 | `Javelin object detection_YOLO 11.ipynb`                  | Detects parts of the javelin using YOLO                 |
 | `Merge body landmarks, Person (ID) detection, and object detection.ipynb` | Combines tracking and detection results     |
 | `Kinematic analysis_javelin throwing.ipynb`               | Performs kinematic analysis for javelin throws          |
-| `Post viewer_streamlit.py`                                | Streamlit app for interactive visualization             |
+| `Pose viewer_streamlit.py`                                | Streamlit app for interactive visualization             |
 | `best.pt`                                                 | YOLO model weights (required for object detection)      |
 | `README.md`                                               | This documentation file                                 |
 
@@ -85,7 +85,7 @@ This repository contains code and Jupyter notebooks for analyzing physical educa
 Use the Streamlit app for interactive visualization:
 
     ```bash
-    streamlit run Post viewer_streamlit.py
+    streamlit run Pose viewer_streamlit.py
     ```
 
 ## 📋 Notes

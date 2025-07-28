@@ -1,5 +1,6 @@
 # === streamlit_pose_viewer.py (fixed session state initialization) ===
 
+# streamlit run "/Users/Christian/Christian Home Drive/Christian/Projekte/CURRENTLY RUNNING PROJECTS/CV and NLP/Python_codes and apps/streamlit_pose_viewer.py"
 
 import streamlit as st
 import cv2
@@ -26,6 +27,45 @@ ONLY_SHOW_HIGH_IDS = False
 MIN_ID_THRESHOLD = 2000
 LIKELIHOOD_THRESHOLD = 0.5
 FRAME_STRIDE = 1
+
+
+# PARAMETERS:
+# For javelin leaves the hand: 
+WHEN_START_MS = 800 # in milliseconds
+MIN_DELTA = 100
+MIN_FRACTION = 0.6
+MIN_SUSTAIN_SEC = 0.2  # duration in seconds
+
+
+THRESHOLD = 6  # how big should the trough be?
+
+
+# Detecting peaks and troughs for foot-strike:
+PROMINENCE = 3
+DISTANCE_MS = 300
+        
+
+# Stride length: 
+STEP_RATIO = 1
+
+
+
+# Parameters for if arm is outstretched during the run-up: 
+ONSET_OFFSET_MS = 150
+OFFSET_BEFORE_RELEASE_MS = 100
+WINDOW_BEFORE_RELEASE_MS = 2500
+REQUIRED_ABOVE_ANGLE_MS = 150
+THRESHOLD_ANGLE = 150
+MIN_MAX_DURATION_FRAMES = 2
+
+
+# Parameters for stopping:
+STOP_WIN_MS = 300
+STOP_RATIO_THRESHOLD = 0.55
+
+time_window_ms = 400  # Analyze steps at xx ms after release (change as needed)
+
+
 
 
 
@@ -216,7 +256,7 @@ def dist(wrist_x, wrist_y, obj_x, obj_y):
 def draw_object_parts(frame, row, object_parts):
     color_map = {
         "Tail": (147, 20, 255),
-        "Handle": (204, 119, 255),
+        "Handle": (147, 0, 255),
         "Tip": (147, 0, 255),
     }
     
@@ -226,8 +266,7 @@ def draw_object_parts(frame, row, object_parts):
         if pd.notna(obj_x) and pd.notna(obj_y):
             obj_coords = (int(obj_x), int(obj_y))
             cv2.circle(frame, obj_coords, 18, color_map.get(part, (200, 200, 200)), -1)
-            cv2.putText(frame, part, (obj_coords[0] - 30, obj_coords[1] - 25),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_map.get(part, (200, 200, 200)), 1)
+
     return frame
 
 
@@ -484,7 +523,7 @@ for key in coords:
 
         # Try filtering
         try:
-            coords[key] = butter_lowpass_filter(np.array(signal), cutoff=cutoff, order=1, fs=30)
+            coords[key] = butter_lowpass_filter(np.array(signal), cutoff=cutoff, order=1, fs=fps)
         except Exception as e:
             print(f"⚠️ Skipping filter for {key} due to error: {e}")
 
@@ -506,10 +545,10 @@ for part in parts:
     coords_df[x_col] = plot_df.get(x_col, pd.Series([np.nan]*len(plot_df))).values
     coords_df[y_col] = plot_df.get(y_col, pd.Series([np.nan]*len(plot_df))).values
 
-def mean_if_at_least_two(row, cols):
+def mean_if_at_least_one(row, cols):
     vals = row[cols].values
     not_nan = np.isfinite(vals)
-    if np.sum(not_nan) >= 2:
+    if np.sum(not_nan) >= 1:
         return np.nanmean(vals)
     else:
         return np.nan
@@ -517,8 +556,8 @@ def mean_if_at_least_two(row, cols):
 x_cols = [f"{part}_center_x" for part in parts]
 y_cols = [f"{part}_center_y" for part in parts]
 
-coords_df["javelin_center_x"] = coords_df.apply(lambda row: mean_if_at_least_two(row, x_cols), axis=1)
-coords_df["javelin_center_y"] = coords_df.apply(lambda row: mean_if_at_least_two(row, y_cols), axis=1)
+coords_df["javelin_center_x"] = coords_df.apply(lambda row: mean_if_at_least_one(row, x_cols), axis=1)
+coords_df["javelin_center_y"] = coords_df.apply(lambda row: mean_if_at_least_one(row, y_cols), axis=1)
 
 # Distance from javelin center to right wrist
 coords_df["dist_javelin_to_right_wrist"] = np.sqrt(
@@ -533,23 +572,57 @@ coords_df["dist_javelin_to_left_wrist"] = np.sqrt(
 )
 
 
+def border_nanmean(arr, n=2, window_size=8):
+    """Mean of up to n closest valid values in first/last window_size."""
+    arr = np.array(arr)
+    # First part
+    first = arr[:window_size]
+    first_valid = first[np.isfinite(first)]
+    if len(first_valid) >= n:
+        first_border_mean = np.mean(first_valid[:n])
+    elif len(first_valid) > 0:
+        first_border_mean = np.mean(first_valid)
+    else:
+        first_border_mean = np.nan
+    # Last part
+    last = arr[-window_size:]
+    last_valid = last[np.isfinite(last)]
+    if len(last_valid) >= n:
+        last_border_mean = np.mean(last_valid[-n:])
+    elif len(last_valid) > 0:
+        last_border_mean = np.mean(last_valid)
+    else:
+        last_border_mean = np.nan
+    return first_border_mean, last_border_mean
 
 
-# Find instant when javelin leasves the hand: 
-def find_sustained_increases(signal, deriv, threshold, min_sustain=100, min_delta=100, min_fraction=0.75, min_start=20):
+def find_sustained_increases(
+        signal, deriv, threshold, min_sustain=100, min_delta=MIN_DELTA, min_fraction=MIN_FRACTION, min_start_ms=WHEN_START_MS):
+    """
+    min_sustain: number of frames
+    min_start_ms: where to start searching, in milliseconds (converted to frames)
+    fps: frames per second
+    """
+    min_start = int(round(min_start_ms * fps / 1000))
     i = min_start
     N = len(signal)
     while i <= N - min_sustain - 1:
         if deriv[i] > threshold:
             window = signal[i:i+min_sustain+1]
+            start_mean, end_mean = border_nanmean(window, n=2, window_size=5)
+            if np.isnan(start_mean) or np.isnan(end_mean):
+                i += 1
+                continue
             diffs = np.diff(window)
             fraction_increasing = np.mean(diffs > 0)
             sustained = fraction_increasing >= min_fraction
-            total_increase = window[-1] - window[0]
+            total_increase = end_mean - start_mean
             if sustained and total_increase > min_delta:
                 return np.array([i])
         i += 1
     return np.array([])
+
+    
     
 
 # First derivate to get the sharp increase in javelin to wrist:
@@ -559,29 +632,25 @@ right_signal = coords_df["dist_javelin_to_right_wrist"].values
 left_deriv  = np.diff(left_signal, prepend=left_signal[0])
 right_deriv = np.diff(right_signal, prepend=right_signal[0])
 
-# Choose a reasonable default, e.g., 0.5 sec duration
-MIN_SUSTAIN_SEC = 0.2  # duration in seconds
 min_sustain = int(fps * MIN_SUSTAIN_SEC)
 
-THRESHOLD = 7  # Adjust as needed
-
 left_sustained_indices  = find_sustained_increases(
-    left_signal, left_deriv, threshold=THRESHOLD, min_sustain=min_sustain, min_delta=100)
+    left_signal, left_deriv, threshold=THRESHOLD, min_sustain=min_sustain, min_delta=MIN_DELTA)
 right_sustained_indices = find_sustained_increases(
-    right_signal, right_deriv, threshold=THRESHOLD, min_sustain=min_sustain, min_delta=100)
+    right_signal, right_deriv, threshold=THRESHOLD, min_sustain=min_sustain, min_delta=MIN_DELTA)
 
 
 release_indices = []
 if len(left_sustained_indices) > 0 and len(right_sustained_indices) > 0:
-    # Mean if both found
-    release_idx = int(np.mean([left_sustained_indices[0], right_sustained_indices[0]]))
+    a = left_sustained_indices[0]
+    b = right_sustained_indices[0]
+    release_idx = int(np.round((a + b) / 2))
 elif len(left_sustained_indices) > 0:
     release_idx = left_sustained_indices[0]
 elif len(right_sustained_indices) > 0:
     release_idx = right_sustained_indices[0]
 else:
     release_idx = None
-
     
 
 # Calculate slope for both hips
@@ -609,16 +678,18 @@ coords_df["right_ankle_rel_x"] = coords_df["right_hip_x"] - coords_df["right_ank
 left_diff = coords_df["left_ankle_rel_x"].values
 right_diff = coords_df["right_ankle_rel_x"].values
 
+DISTANCE = int(np.round(DISTANCE_MS * fps / 1000))
+
 # Detect extrema type depending on slope
 if slope > 0:
     # Detect minima (lows)
-    left_extrema, _ = find_peaks(-left_diff, distance=10, prominence=15)
-    right_extrema, _ = find_peaks(-right_diff, distance=10, prominence=15)
+    left_extrema, _ = find_peaks(-left_diff, distance=DISTANCE, prominence=PROMINENCE)
+    right_extrema, _ = find_peaks(-right_diff, distance=DISTANCE, prominence=PROMINENCE)
     extrema_label = "Minima (before release)"
 elif slope < 0:
     # Detect maxima (highs)
-    left_extrema, _ = find_peaks(left_diff, distance=10, prominence=15)
-    right_extrema, _ = find_peaks(right_diff, distance=10, prominence=15)
+    left_extrema, _ = find_peaks(left_diff, distance=DISTANCE, prominence=PROMINENCE)
+    right_extrema, _ = find_peaks(right_diff, distance=DISTANCE, prominence=PROMINENCE)
     extrema_label = "Maxima (before release)"
 else:
     left_extrema, right_extrema = np.array([]), np.array([])
@@ -630,6 +701,7 @@ if release_idx is not None:
     right_extrema_before = right_extrema[right_extrema < release_idx]
 else:
     left_extrema_before, right_extrema_before = [], []
+
 
 
 
@@ -694,53 +766,147 @@ contacts.sort(key=lambda x: x[0])  # ascending by frame/time
 # Optional: Go backwards from last before release
 contacts = [c for c in contacts if c[0] < release_idx]
 
-# 4. Calculate strides only for alternating sides (e.g. L→R, R→L)
+# 4. Calculate all steps before release, regardless of alternation
+step_events = []
 step_lengths_px = []
 step_types = []
-stride_pairs = []  # For optional annotation
 
-for i in range(len(contacts)-1, 0, -1):  # backwards: closest before release to earliest
-    idx1, x1, y1, side1 = contacts[i]
-    idx0, x0, y0, side0 = contacts[i-1]
-    if side1 != side0:
-        # Only if side alternates!
-        step_length = np.sqrt((x1-x0)**2 + (y1-y0)**2)
-        step_lengths_px.append(step_length)
-        ratio = step_length / leg_length_px
-        if ratio < 1:
-            step_types.append("short")
-        else:
-            step_types.append("long")
-        stride_pairs.append((idx0, idx1, side0, side1))
-
-
-# Reverse to be time-ordered (earliest to latest)
-step_lengths_px = step_lengths_px[::-1]
-step_types      = step_types[::-1]
-stride_pairs    = stride_pairs[::-1]
-
-# === DEBUG OUTPUT: Stride Events Table ===
-stride_table = []
-for i, ((idx0, idx1, side0, side1), step_type, step_length) in enumerate(zip(stride_pairs, step_types, step_lengths_px)):
-    stride_table.append({
-        "i": i,
-        "from_frame": int(idx0),
-        "to_frame": int(idx1),
-        "from_side": side0,
-        "to_side": side1,
+for i in range(1, len(contacts)):  # forwards: earliest to latest
+    idx_prev, x_prev, y_prev, side_prev = contacts[i-1]
+    idx, x, y, side = contacts[i]
+    step_length = np.sqrt((x - x_prev)**2 + (y - y_prev)**2)
+    step_lengths_px.append(step_length)
+    ratio = step_length / leg_length_px if leg_length_px else np.nan
+    step_types.append("short" if ratio < STEP_RATIO else "long")
+    step_events.append({
+        "from_frame": int(idx_prev),
+        "to_frame": int(idx),
+        "from_side": side_prev,
+        "to_side": side,
         "step_length_px": float(step_length),
         "leg_length_px": float(leg_length_px),
-        "step_length/leg_length": float(step_length / leg_length_px) if leg_length_px else np.nan,
-        "type": step_type
+        "step_length/leg_length": float(ratio),
+        "type": "short" if ratio < 1 else "long"
     })
 
-if stride_table:
-    st.markdown("#### Results from calculations:")
-    st.dataframe(pd.DataFrame(stride_table))
+# Sequence of all foot sides before release
+step_sequence = [c[3] for c in contacts]
+st.write("Step side sequence (before release):", step_sequence)
+
+
+stride_pairs = []
+for i in range(1, len(step_events)):
+    prev = step_events[i-1]
+    curr = step_events[i]
+    if prev["to_side"] != curr["to_side"]:  # alternation (e.g., L to R or R to L)
+        stride_pairs.append((prev["to_frame"], curr["to_frame"], prev["to_side"], curr["to_side"]))
+
+
+
+
+
+
+
+# Did the student stop before release?
+# --- Detect steps after release within a restricted time window ---
+# We only count steps that happen shortly after the release event, not later during walking.
+# Adjust `time_window_ms` to set the window (e.g., 400–1200 ms).
+frames_window = int(np.ceil((time_window_ms / 1000) * fps))
+
+# Gather all detected foot contact indices (across both sides, all steps)
+all_contact_indices = np.sort(np.concatenate([left_extrema, right_extrema]))
+
+def steps_after_release_within_window(all_contact_indices, release_idx, frames_window):
+    """Return indices of steps occurring after release within a specific window."""
+    post_release = all_contact_indices[all_contact_indices > release_idx]
+    return [int(idx) for idx in post_release if (idx - release_idx) <= frames_window]
+
+if release_idx is not None:
+    post_release_indices_in_window = steps_after_release_within_window(all_contact_indices, release_idx, frames_window)
+    if len(post_release_indices_in_window) > 0:
+        criterion_release_before_stop = False  # At least one step in window: student did NOT stop immediately after release
+        first_post_release_idx = post_release_indices_in_window[0]
+    else:
+        criterion_release_before_stop = True   # No step in window: student stopped after release
+        first_post_release_idx = None
 else:
-    st.info("No stride events detected for this trial.")
+    criterion_release_before_stop = None
+    first_post_release_idx = None
 
 
+if first_post_release_idx is not None:
+    first_post_release_ms = (first_post_release_idx - release_idx) * 1000 / fps
+else:
+    first_post_release_ms = None
+
+
+
+# --- Deceleration Detection: Is there a "strong stop" before release? ---
+
+# Safe defaults in case of early exit
+vel_before = np.nan
+vel_stop = np.nan
+ratio = np.nan
+strong_stop = None
+stop_accel_value = None
+stop_vel_after = None
+
+# Only calculate if release_idx is valid
+if release_idx is not None:
+    coords_df["mean_hip_x"] = (coords_df["left_hip_x"] + coords_df["right_hip_x"]) / 2
+
+    # Velocity per frame (pixels/frame)
+    coords_df["mean_hip_x_vel"] = coords_df["mean_hip_x"].diff().fillna(0)
+    # Convert to velocity in pixels/sec
+    coords_df["mean_hip_x_vel"] *= fps
+
+    # Frame indices for windows
+    onset_offset_frames = int(np.ceil(ONSET_OFFSET_MS / 1000 * fps))
+    stop_win_frames = int(STOP_WIN_MS / 1000 * fps)
+
+    # Indices for stop window (500 ms before release up to release)
+    idx_stop_win_start = max(onset_offset_frames, release_idx - stop_win_frames)
+    idx_stop_win_end = release_idx + 1  # include release frame
+
+    # Indices for reference window (max 2.5s before stop window, starting at 150 ms after onset)
+    idx_runup_end = idx_stop_win_start
+    idx_runup_start = max(onset_offset_frames, idx_runup_end - int(WINDOW_BEFORE_RELEASE_MS / 1000 * fps))
+
+    # Use mean hip x velocity series
+    hip_vel_series = coords_df["mean_hip_x_vel"].values
+
+    # Calculate mean velocities in the windows
+    vel_before = np.abs(hip_vel_series[idx_runup_start:idx_runup_end]).mean() if idx_runup_end > idx_runup_start else np.nan
+    vel_stop   = np.abs(hip_vel_series[idx_stop_win_start:idx_stop_win_end]).mean() if idx_stop_win_end > idx_stop_win_start else np.nan
+
+    # Stop ratio and criterion
+    ratio = vel_stop / vel_before if vel_before > 0 else np.nan
+    strong_stop = ratio < STOP_RATIO_THRESHOLD if not np.isnan(ratio) else None
+
+    # --- Additional: Compute hip acceleration (stop_accel_value) and post-release velocity (stop_vel_after) ---
+    # Hip acceleration (pixels/sec²)
+    hip_acc_series = np.diff(hip_vel_series, prepend=hip_vel_series[0]) * fps
+
+    # Minimum acceleration (strongest deceleration) in stop window
+    if idx_stop_win_end > idx_stop_win_start:
+        stop_accel_value = np.nanmin(hip_acc_series[idx_stop_win_start:idx_stop_win_end])
+    else:
+        stop_accel_value = None
+
+    # Mean hip velocity in window after release (e.g., next 200 ms)
+    POST_WIN_MS = 200
+    post_win_frames = int(np.ceil(POST_WIN_MS / 1000 * fps))
+    idx_post_win_start = release_idx + 1
+    idx_post_win_end = min(len(hip_vel_series), release_idx + 1 + post_win_frames)
+
+    if idx_post_win_end > idx_post_win_start:
+        stop_vel_after = np.abs(hip_vel_series[idx_post_win_start:idx_post_win_end]).mean()
+    else:
+        stop_vel_after = None
+
+
+
+    
 
 
 
@@ -867,13 +1033,6 @@ else:
     raise ValueError("Unknown throwing direction!")
 
     
-# --- Parameters ---
-ONSET_OFFSET_MS = 150
-OFFSET_BEFORE_RELEASE_MS = 100
-WINDOW_BEFORE_RELEASE_MS = 2500
-REQUIRED_ABOVE_ANGLE_MS = 150
-THRESHOLD_ANGLE = 150
-MIN_MAX_DURATION_FRAMES = 2
 
 fps = float(fps)
 
@@ -985,13 +1144,14 @@ else:
         "fps": fps, 
         "slope": float(slope),
         "leg_length_px": float(leg_length_px),
-        "num_strides": len(stride_pairs),
-        "stride_from_frames": [int(x[0]) for x in stride_pairs],
-        "stride_to_frames": [int(x[1]) for x in stride_pairs],
-        "stride_from_sides": [x[2] for x in stride_pairs],
-        "stride_to_sides": [x[3] for x in stride_pairs],
-        "stride_lengths_px": [float(x) for x in step_lengths_px],
-        "stride_types": step_types,
+        "num_steps": len(step_events),
+        "step_from_frames": [x["from_frame"] for x in step_events],
+        "step_to_frames": [x["to_frame"] for x in step_events],
+        "step_from_sides": [x["from_side"] for x in step_events],
+        "step_to_sides": [x["to_side"] for x in step_events],
+        "step_lengths_px": [x["step_length_px"] for x in step_events],
+        "step_types": [x["type"] for x in step_events],
+        "step_sequence": [x["to_side"] for x in step_events], 
         # Real event-based kinematic fields (replace with your calculated variables)
         "throwing_side": throwing_side,
         "elbow_ahead_of_wrist_ms_pre": float(num_frames_ahead * 1000 / fps),
@@ -1009,6 +1169,15 @@ else:
         "sustained_extension": bool(sustained_extension_and_behind),
         "sustained_extension_start_idx": sustained_start_idx,
         "sustained_extension_end_idx": sustained_end_idx,
+        "true_stop_after_release": bool(criterion_release_before_stop),
+        "first_post_release_idx": int(first_post_release_idx) if first_post_release_idx is not None else None,
+        "first_post_release_ms": float(first_post_release_ms) if first_post_release_ms is not None else None,
+        "strong_stop": bool(strong_stop) if strong_stop is not None else None,
+        "vel_before": float(vel_before) if not np.isnan(vel_before) else None,
+        "vel_stop": float(vel_stop) if not np.isnan(vel_stop) else None,
+        "stop_ratio": float(ratio) if not np.isnan(ratio) else None,
+        "min_hip_acc": float(stop_accel_value) if stop_accel_value is not None else None,
+        "stop_vel_after": float(stop_vel_after) if stop_vel_after is not None else None,
     }
     all_results.append(summary_row)
 
@@ -1210,15 +1379,18 @@ if st.session_state.play:
         axs[3].scatter(right_extrema_before, right_diff[right_extrema_before], 
                color="brown", s=60, zorder=6, label=f"Right {extrema_label}")
 
-        for i, (idx0, idx1, side0, side1) in enumerate(stride_pairs):
-            # x midpoint between contacts
-            x_plot = (idx0 + idx1) / 2
-            # y values for both contacts
-            y0 = left_diff[idx0] if side0 == "L" else right_diff[idx0]
-            y1 = left_diff[idx1] if side1 == "L" else right_diff[idx1]
+        for i, step in enumerate(step_events):
+            # Calculate midpoint x value between contacts
+            x_plot = (step["from_frame"] + step["to_frame"]) / 2
+        
+            # Get corresponding y values for plotting annotation
+            y0 = left_diff[step["from_frame"]] if step["from_side"] == "L" else right_diff[step["from_frame"]]
+            y1 = left_diff[step["to_frame"]]   if step["to_side"]   == "L" else right_diff[step["to_frame"]]
             y_plot = (y0 + y1) / 2
+        
+            # Annotate step type ("long" or "short")
             axs[3].text(
-                x_plot, y_plot, step_types[i],
+                x_plot, y_plot, step["type"],
                 fontsize=11, color="black",
                 ha="center", va="bottom", fontweight="bold",
                 bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.7, edgecolor="none")
@@ -1250,7 +1422,12 @@ if st.session_state.play:
             bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.6)
         )
             
+        # Visualize final computed release_idx (thick, red, labeled)
+        if release_idx is not None and start <= release_idx < end:
+            axs[4].axvline(release_idx, color="red", linestyle="-", linewidth=2.5, label='Final release')
+            axs[4].legend()
 
+            
         plt.tight_layout()
         fig.subplots_adjust(hspace=0.6)
         show_sharp_plot(fig, graph_placeholder)
@@ -1382,20 +1559,23 @@ else:
     axs[3].scatter(right_extrema_before, right_diff[right_extrema_before], 
                color="brown", s=60, zorder=6, label=f"Right {extrema_label}")
 
-    for i, (idx0, idx1, side0, side1) in enumerate(stride_pairs):
-        # x midpoint between contacts
-        x_plot = (idx0 + idx1) / 2
-        # y values for both contacts
-        y0 = left_diff[idx0] if side0 == "L" else right_diff[idx0]
-        y1 = left_diff[idx1] if side1 == "L" else right_diff[idx1]
+    for i, step in enumerate(step_events):
+        # Calculate midpoint x value between contacts
+        x_plot = (step["from_frame"] + step["to_frame"]) / 2
+    
+        # Get corresponding y values for plotting annotation
+        y0 = left_diff[step["from_frame"]] if step["from_side"] == "L" else right_diff[step["from_frame"]]
+        y1 = left_diff[step["to_frame"]]   if step["to_side"]   == "L" else right_diff[step["to_frame"]]
         y_plot = (y0 + y1) / 2
+    
+        # Annotate step type ("long" or "short")
         axs[3].text(
-            x_plot, y_plot, step_types[i],
+            x_plot, y_plot, step["type"],
             fontsize=11, color="black",
             ha="center", va="bottom", fontweight="bold",
             bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.7, edgecolor="none")
         )
-    
+        
     axs[3].set_title("Hip_Ankle_x_difference")
 
 
@@ -1424,6 +1604,11 @@ else:
         bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.6)
     )
 
+    # Visualize final computed release_idx (thick, red, labeled)
+    if release_idx is not None and start <= release_idx < end:
+        axs[4].axvline(release_idx, color="red", linestyle="-", linewidth=2.5, label='Final release')
+        axs[4].legend()
+    
     plt.tight_layout()
     fig.subplots_adjust(hspace=0.6)
     show_sharp_plot(fig, graph_placeholder)
