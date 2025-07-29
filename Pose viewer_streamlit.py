@@ -32,12 +32,12 @@ FRAME_STRIDE = 1
 # PARAMETERS:
 # For javelin leaves the hand: 
 WHEN_START_MS = 800 # in milliseconds
-MIN_DELTA = 100
-MIN_FRACTION = 0.6
-MIN_SUSTAIN_SEC = 0.2  # duration in seconds
+MIN_DELTA = 150
+MIN_FRACTION = 0.55
+MIN_SUSTAIN_SEC = 0.25  # duration in seconds
 
 
-THRESHOLD = 6  # how big should the trough be?
+THRESHOLD = 10  # how big should the rise be?
 
 
 # Detecting peaks and troughs for foot-strike:
@@ -48,6 +48,9 @@ DISTANCE_MS = 300
 # Stride length: 
 STEP_RATIO = 1
 
+# For Footstrike: 
+MAX_SHIFT_MS = 400  # adjust if needed
+Y_PROMINENCE = 1  # controls how "sharp" a trough must be
 
 
 # Parameters for if arm is outstretched during the run-up: 
@@ -270,6 +273,63 @@ def draw_object_parts(frame, row, object_parts):
     return frame
 
 
+
+
+def refine_to_next_ankle_y_maximum(
+    coords_df,
+    candidate_indices,
+    side,
+    fps,
+    MAX_SHIFT_MS,
+    Y_PROMINENCE=0.0
+):
+    """
+    For each candidate frame, search forward up to MAX_SHIFT_MS in the ankle_y signal
+    for the NEXT local maximum (peak). If none is found, keep the original index.
+
+    Parameters
+    ----------
+    coords_df : pd.DataFrame
+        DataFrame containing pose data.
+    candidate_indices : list[int] or np.array[int]
+        Frame indices of initial candidates.
+    side : str
+        'left' or 'right'
+    fps : float
+        Frames per second.
+    MAX_SHIFT_MS : int
+        Max window after candidate to search (in milliseconds).
+    Y_PROMINENCE : float
+        Optional minimum prominence for maxima.
+
+    Returns
+    -------
+    List[int] : Refined frame indices (each being either the next peak or original).
+    """
+    ankle_y = coords_df[f"{side}_ankle_y"].values
+    max_shift = int(np.round(MAX_SHIFT_MS * fps / 1000))
+    N = len(ankle_y)
+    refined_indices = []
+
+    for idx in candidate_indices:
+        # Define the window: starts just after idx to idx+max_shift (inclusive)
+        start = idx + 1
+        end = min(idx + max_shift, N - 1)
+        if start > end:
+            # If window is empty, just keep idx
+            refined_indices.append(idx)
+            continue
+        segment = ankle_y[start:end+1]
+        peaks, _ = find_peaks(segment, prominence=Y_PROMINENCE)
+        if len(peaks) > 0:
+            # peaks[0] is relative to start, so add to start (which is idx+1)
+            refined_indices.append(start + peaks[0])
+        else:
+            refined_indices.append(idx)
+    return refined_indices
+    
+
+    
 
 # === STREAMLIT APP ===
 st.set_page_config(layout="wide")
@@ -672,22 +732,22 @@ else:
 
 
 # Calculate hip to ankle distance: 
+# --- Step 1: Prepare signals ---
 coords_df["left_ankle_rel_x"] = coords_df["left_hip_x"] - coords_df["left_ankle_x"]
 coords_df["right_ankle_rel_x"] = coords_df["right_hip_x"] - coords_df["right_ankle_x"]
-            
+
 left_diff = coords_df["left_ankle_rel_x"].values
 right_diff = coords_df["right_ankle_rel_x"].values
 
 DISTANCE = int(np.round(DISTANCE_MS * fps / 1000))
+MAX_SHIFT_FRAMES = int(np.round(MAX_SHIFT_MS * fps / 1000))  # max shift in frames
 
-# Detect extrema type depending on slope
+# --- Step 2: Find extrema in horizontal distance ---
 if slope > 0:
-    # Detect minima (lows)
     left_extrema, _ = find_peaks(-left_diff, distance=DISTANCE, prominence=PROMINENCE)
     right_extrema, _ = find_peaks(-right_diff, distance=DISTANCE, prominence=PROMINENCE)
     extrema_label = "Minima (before release)"
 elif slope < 0:
-    # Detect maxima (highs)
     left_extrema, _ = find_peaks(left_diff, distance=DISTANCE, prominence=PROMINENCE)
     right_extrema, _ = find_peaks(right_diff, distance=DISTANCE, prominence=PROMINENCE)
     extrema_label = "Maxima (before release)"
@@ -695,14 +755,26 @@ else:
     left_extrema, right_extrema = np.array([]), np.array([])
     extrema_label = "No movement"
 
-# Only those BEFORE the release event
+# --- Step 3: Filter to those before release ---
 if release_idx is not None:
     left_extrema_before = left_extrema[left_extrema < release_idx]
     right_extrema_before = right_extrema[right_extrema < release_idx]
 else:
     left_extrema_before, right_extrema_before = [], []
 
+# --- Step 4: Refine using ankle_y minima ---
+left_refined = refine_to_next_ankle_y_maximum(
+    coords_df, left_extrema_before, side="left", fps=fps,
+    MAX_SHIFT_MS=MAX_SHIFT_MS, Y_PROMINENCE=Y_PROMINENCE
+)
+right_refined = refine_to_next_ankle_y_maximum(
+    coords_df, right_extrema_before, side="right", fps=fps,
+    MAX_SHIFT_MS=MAX_SHIFT_MS, Y_PROMINENCE=Y_PROMINENCE
+)
 
+
+
+            
 
 
 # Calculations of joint angles:
@@ -754,9 +826,9 @@ leg_length_px = np.nanmedian(leg_lengths_px)
 
 # 1. Gather events (frame idx, x, y, side)
 contacts = []
-for idx in left_extrema_before:
+for idx in left_refined:
     contacts.append((idx, coords_df.loc[idx, 'left_ankle_x'], coords_df.loc[idx, 'left_ankle_y'], 'L'))
-for idx in right_extrema_before:
+for idx in right_refined:
     contacts.append((idx, coords_df.loc[idx, 'right_ankle_x'], coords_df.loc[idx, 'right_ankle_y'], 'R'))
 
 # 2. Sort by frame index (time)
@@ -814,7 +886,7 @@ for i in range(1, len(step_events)):
 frames_window = int(np.ceil((time_window_ms / 1000) * fps))
 
 # Gather all detected foot contact indices (across both sides, all steps)
-all_contact_indices = np.sort(np.concatenate([left_extrema, right_extrema]))
+all_contact_indices = np.sort(np.concatenate([left_refined, right_refined]))
 
 def steps_after_release_within_window(all_contact_indices, release_idx, frames_window):
     """Return indices of steps occurring after release within a specific window."""
@@ -1338,6 +1410,12 @@ if st.session_state.play:
         axs[1].axvline(playback_index, color='black', linestyle='--', linewidth=0.6)
         axs[1].set_xlim(start, end)
         axs[1].legend()
+        left_frames_ankley = [frame for frame in left_refined if start <= frame <= end]
+        right_frames_ankley = [frame for frame in right_refined if start <= frame <= end]
+        left_y_vals_ankley = [coords_df.loc[frame, "left_ankle_y"] for frame in left_frames_ankley]
+        right_y_vals_ankley = [coords_df.loc[frame, "right_ankle_y"] for frame in right_frames_ankley]
+        axs[1].scatter(left_frames_ankley, left_y_vals_ankley, color="orange", s=60, zorder=6, label="Refined L Contact")
+        axs[1].scatter(right_frames_ankley, right_y_vals_ankley, color="brown", s=60, zorder=6, label="Refined R Contact")
         axs[1].set_title("Ankle Y Coordinates")
 
         axs[6].plot(window_df["left_hip_y"], label="Left Hip Y", color="brown", linewidth=0.8)
@@ -1367,17 +1445,22 @@ if st.session_state.play:
                     fontsize=10, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
         axs[7].set_title("Hip X Coordinates")
 
+        
         axs[3].plot(window_df["left_ankle_rel_x"], label="left_hip_ank_dist", color="orange", linewidth=0.8)
         axs[3].plot(window_df["right_ankle_rel_x"], label="right_hip_ank_dist", color="brown", linewidth=0.8)
         axs[3].axvline(playback_index, color='black', linestyle='--', linewidth=0.6)
         axs[3].set_xlim(start, end)
         axs[3].legend()
 
-        axs[3].scatter(left_extrema_before, left_diff[left_extrema_before], 
-               color="orange", s=60, zorder=6, label=f"Left {extrema_label}")
-
-        axs[3].scatter(right_extrema_before, right_diff[right_extrema_before], 
-               color="brown", s=60, zorder=6, label=f"Right {extrema_label}")
+        # Extract final contact frames and y-values
+        left_frames = [frame for frame, _, _, side in contacts if side == "L" and start <= frame <= end]
+        left_y_vals = [coords_df.loc[frame, "left_ankle_rel_x"] for frame in left_frames]
+        
+        right_frames = [frame for frame, _, _, side in contacts if side == "R" and start <= frame <= end]
+        right_y_vals = [coords_df.loc[frame, "right_ankle_rel_x"] for frame in right_frames]
+        
+        axs[3].scatter(left_frames, left_y_vals, color="orange", s=60, zorder=6, label="Final Left Contact")
+        axs[3].scatter(right_frames, right_y_vals, color="brown", s=60, zorder=6, label="Final Right Contact")
 
         for i, step in enumerate(step_events):
             # Calculate midpoint x value between contacts
@@ -1517,6 +1600,12 @@ else:
     axs[1].axvline(st.session_state.frame_idx, color='black', linestyle='--', linewidth=0.6)
     axs[1].set_xlim(start, end)
     axs[1].legend()
+    left_frames_ankley = [frame for frame in left_refined if start <= frame <= end]
+    right_frames_ankley = [frame for frame in right_refined if start <= frame <= end]
+    left_y_vals_ankley = [coords_df.loc[frame, "left_ankle_y"] for frame in left_frames_ankley]
+    right_y_vals_ankley = [coords_df.loc[frame, "right_ankle_y"] for frame in right_frames_ankley]
+    axs[1].scatter(left_frames_ankley, left_y_vals_ankley, color="orange", s=60, zorder=6, label="Refined L Contact")
+    axs[1].scatter(right_frames_ankley, right_y_vals_ankley, color="brown", s=60, zorder=6, label="Refined R Contact")
     axs[1].set_title("Ankle Y Coordinates")
 
     axs[6].plot(window_df["left_hip_y"], label="Left Hip Y", color="brown", linewidth=0.8)
@@ -1553,11 +1642,15 @@ else:
     axs[3].set_xlim(start, end)
     axs[3].legend()
 
-    axs[3].scatter(left_extrema_before, left_diff[left_extrema_before], 
-               color="orange", s=60, zorder=6, label=f"Left {extrema_label}")
-
-    axs[3].scatter(right_extrema_before, right_diff[right_extrema_before], 
-               color="brown", s=60, zorder=6, label=f"Right {extrema_label}")
+    # Extract final contact frames and y-values
+    left_frames = [frame for frame, _, _, side in contacts if side == "L" and start <= frame <= end]
+    left_y_vals = [coords_df.loc[frame, "left_ankle_rel_x"] for frame in left_frames]
+    
+    right_frames = [frame for frame, _, _, side in contacts if side == "R" and start <= frame <= end]
+    right_y_vals = [coords_df.loc[frame, "right_ankle_rel_x"] for frame in right_frames]
+    
+    axs[3].scatter(left_frames, left_y_vals, color="orange", s=60, zorder=6, label="Final Left Contact")
+    axs[3].scatter(right_frames, right_y_vals, color="brown", s=60, zorder=6, label="Final Right Contact")
 
     for i, step in enumerate(step_events):
         # Calculate midpoint x value between contacts
