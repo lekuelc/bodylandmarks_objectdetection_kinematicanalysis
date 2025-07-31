@@ -20,7 +20,7 @@ import base64
 
 
 # === SETTINGS ===
-VIDEO_INPUT_FOLDER = Path("/Users/Christian/Downloads/test")
+VIDEO_INPUT_FOLDER = Path("/Users/Christian/Downloads/testtest")
 FINAL_DF_INPUT_FOLDER = VIDEO_INPUT_FOLDER / "corrected"
 CACHE_FOLDER = Path("cached_videos"); CACHE_FOLDER.mkdir(exist_ok=True)
 ONLY_SHOW_HIGH_IDS = False
@@ -31,13 +31,13 @@ FRAME_STRIDE = 1
 
 # PARAMETERS:
 # For javelin leaves the hand: 
-WHEN_START_MS = 800 # in milliseconds
-MIN_DELTA = 150
-MIN_FRACTION = 0.55
-MIN_SUSTAIN_SEC = 0.25  # duration in seconds
+WHEN_START_MS = 500 # in milliseconds
+MIN_DELTA = 100
+MIN_FRACTION = 0.50
+MIN_SUSTAIN_SEC = 0.10  # duration in seconds
 
 
-THRESHOLD = 10  # how big should the rise be?
+THRESHOLD = 6  # how big should the rise be?
 
 
 # Detecting peaks and troughs for foot-strike:
@@ -460,8 +460,10 @@ with slider_col:
             if len(seg) >= min_frames:
                 valid_ids.append(pid)
                 break  # One valid segment is enough
+    # Filter out ID -1:            
+    valid_ids = [pid for pid in valid_ids if pid not in [-1, "-1"]]
     
-    person_ids_all = sorted(valid_ids)
+    person_ids_all = sorted([pid for pid in valid_ids if pid not in [-1, "-1"]])
     person_ids = [pid for pid in person_ids_all if pid >= MIN_ID_THRESHOLD] if ONLY_SHOW_HIGH_IDS else person_ids_all
 
     if not person_ids:
