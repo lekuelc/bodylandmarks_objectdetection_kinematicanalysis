@@ -25,6 +25,7 @@ This repository contains code and Jupyter notebooks for analyzing physical educa
 | `Kinematic analysis_javelin throwing.ipynb`               | Performs kinematic analysis for javelin throws          |
 | `Pose viewer_streamlit.py`                                | Streamlit app for interactive visualization             |
 | `best.pt`                                                 | YOLO model weights (required for object detection)      |
+| `dataset.yaml`                                            | Configuration file defining class names and dataset locations for YOLO object detection    |
 | `README.md`                                               | This documentation file                                 |
 
 ## 🛠️ Installation
@@ -71,7 +72,7 @@ This repository contains code and Jupyter notebooks for analyzing physical educa
    Run `Body landmarks_YOLO 11 and RTM Pose.ipynb` to track major joints. *Requires bounding boxes from YOLO.*
 
 3. **Object detection:**  
-   Run `Javelin object detection_YOLO 11.ipynb` to detect javelin parts (requires trained YOLO weights in `best.pt`).
+   Run `Javelin object detection_YOLO 11.ipynb` to detect javelin parts (requires trained YOLO weights in `best.pt`, and also `dataset.yaml`).
 
 4. **Merge detections:**  
    Run `Merge body landmarks, Person (ID) detection, and object detection.ipynb` to combine all results into a unified dataset.

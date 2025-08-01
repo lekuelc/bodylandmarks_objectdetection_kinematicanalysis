@@ -1,0 +1,5 @@
+path: /Users/Christian/Downloads/Javelin training/YOLO javelin_2/yolo_dataset
+train: images/train
+val: images/val
+nc: 3
+names: ['Handle', 'Tail', 'Tip']
