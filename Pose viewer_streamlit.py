@@ -20,7 +20,7 @@ import base64
 
 
 # === SETTINGS ===
-VIDEO_INPUT_FOLDER = Path("/Users/Christian/Downloads/testtest")
+VIDEO_INPUT_FOLDER = Path("/Users/Christian/Downloads/test")
 FINAL_DF_INPUT_FOLDER = VIDEO_INPUT_FOLDER / "corrected"
 CACHE_FOLDER = Path("cached_videos"); CACHE_FOLDER.mkdir(exist_ok=True)
 ONLY_SHOW_HIGH_IDS = False
@@ -31,13 +31,13 @@ FRAME_STRIDE = 1
 
 # PARAMETERS:
 # For javelin leaves the hand: 
-WHEN_START_MS = 500 # in milliseconds
-MIN_DELTA = 100
-MIN_FRACTION = 0.50
-MIN_SUSTAIN_SEC = 0.10  # duration in seconds
+WHEN_START_MS = 800 # in milliseconds
+MIN_DELTA = 160
+MIN_FRACTION = 0.55
+MIN_SUSTAIN_SEC = 0.25  # duration in seconds
 
 
-THRESHOLD = 6  # how big should the rise be?
+THRESHOLD = 10  # how big should the rise be?
 
 
 # Detecting peaks and troughs for foot-strike:
@@ -606,6 +606,14 @@ for part in parts:
         print(f"⚠️ Warning: {x_col} or {y_col} not found in {session_name} (will fill with NaN).")
     coords_df[x_col] = plot_df.get(x_col, pd.Series([np.nan]*len(plot_df))).values
     coords_df[y_col] = plot_df.get(y_col, pd.Series([np.nan]*len(plot_df))).values
+
+for part in parts:
+    x_col = f"{part}_center_x"
+    y_col = f"{part}_center_y"
+    for col in [x_col, y_col]:
+        if col in coords_df.columns:
+            coords_df[col] = pd.Series(coords_df[col]).interpolate(method='linear', limit_direction='both')
+
 
 def mean_if_at_least_one(row, cols):
     vals = row[cols].values
