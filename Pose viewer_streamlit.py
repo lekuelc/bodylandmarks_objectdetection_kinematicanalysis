@@ -20,7 +20,7 @@ import base64
 
 
 # === SETTINGS ===
-VIDEO_INPUT_FOLDER = Path("/Users/Christian/Downloads/test")
+VIDEO_INPUT_FOLDER = Path("/Users/Christian/Downloads/Video_Daten/Kirchzarten_Grundschule_Baro")
 FINAL_DF_INPUT_FOLDER = VIDEO_INPUT_FOLDER / "corrected"
 CACHE_FOLDER = Path("cached_videos"); CACHE_FOLDER.mkdir(exist_ok=True)
 ONLY_SHOW_HIGH_IDS = False
